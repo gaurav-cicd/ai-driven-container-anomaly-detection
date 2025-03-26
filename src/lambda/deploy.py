@@ -2,119 +2,124 @@ import os
 import boto3
 import zipfile
 from datetime import datetime
+from ..utils.vault_config import VaultConfig
 
 def create_lambda_package():
     """Create a ZIP package for the Lambda function."""
-    package_dir = "lambda_package"
-    os.makedirs(package_dir, exist_ok=True)
+    # Create a temporary directory for packaging
+    os.makedirs('lambda_package', exist_ok=True)
     
     # Copy the Lambda function code
-    with open("src/lambda/anomaly_handler.py", "r") as source:
-        with open(f"{package_dir}/lambda_function.py", "w") as target:
+    with open('src/lambda/anomaly_handler.py', 'r') as source:
+        with open('lambda_package/anomaly_handler.py', 'w') as target:
             target.write(source.read())
     
     # Create ZIP file
-    zip_path = "lambda_function.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(package_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, package_dir)
-                zipf.write(file_path, arcname)
+    with zipfile.ZipFile('lambda_package.zip', 'w') as zipf:
+        zipf.write('lambda_package/anomaly_handler.py', 'anomaly_handler.py')
     
-    return zip_path
+    return 'lambda_package.zip'
 
 def deploy_lambda():
-    """Deploy the Lambda function to AWS."""
-    lambda_client = boto3.client('lambda')
-    function_name = "container-anomaly-detector"
-    
-    # Create Lambda package
-    zip_path = create_lambda_package()
-    
+    """Deploy the Lambda function and set up EventBridge rule."""
     try:
-        # Check if function exists
+        # Initialize AWS clients
+        lambda_client = boto3.client('lambda')
+        events_client = boto3.client('events')
+        iam_client = boto3.client('iam')
+        
+        # Get configuration from Vault
+        vault = VaultConfig()
+        role_arn = vault.get_secret('AWS_LAMBDA_ROLE_ARN')
+        
+        # Create Lambda package
+        package_path = create_lambda_package()
+        
+        # Create or update Lambda function
+        function_name = 'container-anomaly-detector'
+        
         try:
-            lambda_client.get_function(FunctionName=function_name)
-            print(f"Updating existing function: {function_name}")
-            
-            # Update function code
-            with open(zip_path, 'rb') as file_data:
-                bytes_content = file_data.read()
+            # Update existing function
+            with open(package_path, 'rb') as file_data:
                 lambda_client.update_function_code(
                     FunctionName=function_name,
-                    ZipFile=bytes_content
+                    ZipFile=file_data.read()
                 )
         except lambda_client.exceptions.ResourceNotFoundException:
-            print(f"Creating new function: {function_name}")
-            
             # Create new function
-            with open(zip_path, 'rb') as file_data:
-                bytes_content = file_data.read()
+            with open(package_path, 'rb') as file_data:
                 lambda_client.create_function(
                     FunctionName=function_name,
                     Runtime='python3.8',
-                    Handler='lambda_function.lambda_handler',
-                    Role=os.getenv('LAMBDA_ROLE_ARN'),
-                    Code={'ZipFile': bytes_content},
+                    Handler='anomaly_handler.lambda_handler',
+                    Role=role_arn,
+                    Code={'ZipFile': file_data.read()},
                     Timeout=300,
                     MemorySize=256,
                     Environment={
                         'Variables': {
-                            'MODEL_NAME': 'container-anomaly-detector',
-                            'ECS_CLUSTER_NAME': os.getenv('ECS_CLUSTER_NAME'),
-                            'ECS_SERVICE_NAME': os.getenv('ECS_SERVICE_NAME'),
-                            'SNS_TOPIC_ARN': os.getenv('SNS_TOPIC_ARN')
+                            'S3_BUCKET_NAME': vault.get_secret('AWS_S3_BUCKET'),
+                            'ECS_CLUSTER_NAME': vault.get_secret('AWS_ECS_CLUSTER'),
+                            'SAGEMAKER_ENDPOINT': vault.get_secret('AWS_SAGEMAKER_ENDPOINT')
                         }
                     }
                 )
         
-        # Create CloudWatch Events rule
-        events_client = boto3.client('events')
-        rule_name = f"{function_name}-rule"
+        # Create EventBridge rule
+        rule_name = 'container-anomaly-detection-rule'
         
+        # Schedule: Run every 5 minutes
+        schedule_expression = 'rate(5 minutes)'
+        
+        # Create or update the rule
         try:
             events_client.put_rule(
                 Name=rule_name,
-                ScheduleExpression='rate(5 minutes)',
+                ScheduleExpression=schedule_expression,
                 State='ENABLED',
-                Description='Trigger container anomaly detection every 5 minutes'
-            )
-            
-            # Add permission for CloudWatch Events to invoke Lambda
-            lambda_client.add_permission(
-                FunctionName=function_name,
-                StatementId=f"{rule_name}-permission",
-                Action='lambda:InvokeFunction',
-                Principal='events.amazonaws.com',
-                SourceArn=f"arn:aws:events:{os.getenv('AWS_REGION')}:{os.getenv('AWS_ACCOUNT_ID')}:rule/{rule_name}"
-            )
-            
-            # Add Lambda as target for the rule
-            events_client.put_targets(
-                Rule=rule_name,
+                Description='Triggers container anomaly detection every 5 minutes',
                 Targets=[{
-                    'Id': f"{function_name}-target",
-                    'Arn': f"arn:aws:lambda:{os.getenv('AWS_REGION')}:{os.getenv('AWS_ACCOUNT_ID')}:function:{function_name}"
+                    'Id': 'ContainerAnomalyDetection',
+                    'Arn': lambda_client.get_function(FunctionName=function_name)['Configuration']['FunctionArn']
                 }]
             )
-            
-        except events_client.exceptions.ResourceAlreadyExistsException:
-            print(f"Rule {rule_name} already exists")
+        except events_client.exceptions.ResourceNotFoundException:
+            events_client.create_rule(
+                Name=rule_name,
+                ScheduleExpression=schedule_expression,
+                State='ENABLED',
+                Description='Triggers container anomaly detection every 5 minutes',
+                Targets=[{
+                    'Id': 'ContainerAnomalyDetection',
+                    'Arn': lambda_client.get_function(FunctionName=function_name)['Configuration']['FunctionArn']
+                }]
+            )
         
-        print(f"Successfully deployed Lambda function: {function_name}")
+        # Add permission for EventBridge to invoke Lambda
+        try:
+            lambda_client.add_permission(
+                FunctionName=function_name,
+                StatementId='EventBridgeInvokeFunction',
+                Action='lambda:InvokeFunction',
+                Principal='events.amazonaws.com',
+                SourceArn=events_client.describe_rule(Name=rule_name)['Arn']
+            )
+        except lambda_client.exceptions.ResourceConflictException:
+            # Permission already exists
+            pass
+        
+        print(f"Successfully deployed Lambda function '{function_name}' and EventBridge rule '{rule_name}'")
         
     except Exception as e:
         print(f"Error deploying Lambda function: {str(e)}")
         raise
-    
     finally:
         # Clean up
-        if os.path.exists(zip_path):
-            os.remove(zip_path)
-        if os.path.exists("lambda_package"):
+        if os.path.exists('lambda_package.zip'):
+            os.remove('lambda_package.zip')
+        if os.path.exists('lambda_package'):
             import shutil
-            shutil.rmtree("lambda_package")
+            shutil.rmtree('lambda_package')
 
 if __name__ == "__main__":
     deploy_lambda() 

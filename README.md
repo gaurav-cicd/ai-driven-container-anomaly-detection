@@ -4,7 +4,7 @@ This project implements an AI-driven monitoring system to detect container perfo
 
 ## Project Overview
 
-The system collects container metrics from Splunk, trains an AI model using AWS SageMaker to predict anomalies, and automates anomaly alerts and scaling events using AWS Lambda.
+The system automatically collects container metrics from Splunk, trains an AI model using AWS SageMaker to predict anomalies, and automates anomaly alerts and scaling events using AWS Lambda. The entire process runs automatically every 5 minutes without manual intervention.
 
 ## Architecture
 
@@ -15,6 +15,7 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
 - **Security**: HashiCorp Vault for secure credential management
 - **Configuration**: YAML-based configuration with Vault integration
 - **Logging**: Structured logging with metrics collection
+- **Scheduling**: AWS EventBridge for automated execution
 
 ## Project Structure
 
@@ -49,6 +50,7 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
   - AWS SNS
   - AWS S3
   - AWS IAM
+  - AWS EventBridge
 - Splunk Enterprise with container metrics data
 - Dynatrace account for additional monitoring
 - Docker (for container testing)
@@ -88,8 +90,11 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
 5. Store secrets in Vault:
    ```bash
    # AWS Credentials
-   vault kv put secret/container-anomaly-detection/aws/iam role-arn="your-role-arn"
-   vault kv put secret/container-anomaly-detection/aws/sns topic-arn="your-topic-arn"
+   vault kv put secret/container-anomaly-detection/aws/iam role-arn="your-lambda-role-arn"
+   vault kv put secret/container-anomaly-detection/aws/s3 bucket-name="your-bucket-name"
+   vault kv put secret/container-anomaly-detection/aws/ecs cluster-name="your-cluster-name"
+   vault kv put secret/container-anomaly-detection/aws/sns topic-arn="your-sns-topic-arn"
+   vault kv put secret/container-anomaly-detection/aws/sagemaker endpoint="your-endpoint-name"
    
    # Splunk Credentials
    vault kv put secret/container-anomaly-detection/splunk/host "your-splunk-host"
@@ -166,41 +171,32 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
    # Note: Secrets should be referenced using vault:// prefix
    ```
 
-## Usage Steps
+## Automated Execution
 
-### 1. Data Collection
+The system runs automatically every 5 minutes using AWS EventBridge. Here's how it works:
 
-1. Ensure Vault is running and accessible
-2. Run the data collector:
+1. **Initial Deployment**:
    ```bash
-   python src/data_collection/splunk_collector.py
-   ```
-3. Verify collected metrics in `data/` directory
-
-### 2. Model Training
-
-1. Ensure you have collected enough training data
-2. Train the model:
-   ```bash
-   python src/model/train.py
-   ```
-3. Verify model deployment in AWS SageMaker console
-
-### 3. Lambda Deployment
-
-1. Ensure Vault is accessible from Lambda
-2. Deploy the Lambda function:
-   ```bash
+   # Deploy Lambda function and EventBridge rule
    python src/lambda/deploy.py
    ```
-3. Verify deployment in AWS Lambda console
 
-### 4. Monitoring and Maintenance
+2. **Automated Workflow**:
+   - Every 5 minutes, EventBridge triggers the Lambda function
+   - The Lambda function:
+     1. Collects container metrics from Splunk
+     2. Saves metrics to S3 for historical tracking
+     3. Detects anomalies using the SageMaker model
+     4. If anomalies are found:
+        - Scales containers automatically
+        - Sends alerts via SNS
+     5. Logs all activities to CloudWatch
 
-1. Monitor CloudWatch logs for Lambda execution
-2. Check SNS notifications for anomaly alerts
-3. Review ECS service scaling events
-4. Monitor model performance and retrain as needed
+3. **Monitoring**:
+   - CloudWatch Logs for Lambda execution
+   - SNS notifications for alerts
+   - S3 for metric history
+   - AWS Console for Lambda and EventBridge status
 
 ## Testing
 
@@ -258,6 +254,12 @@ Common issues and solutions:
    - Verify Vault access from Lambda
    - Review IAM permissions
    - Check Lambda timeout settings
+
+7. **EventBridge Issues**
+   - Verify rule status in AWS Console
+   - Check Lambda permissions
+   - Review CloudWatch metrics
+   - Validate schedule expression
 
 ## Contributing
 
