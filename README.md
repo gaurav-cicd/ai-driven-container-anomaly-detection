@@ -17,6 +17,17 @@ The system automatically collects container metrics from Splunk, trains an AI mo
 - **Logging**: Structured logging with metrics collection
 - **Scheduling**: AWS EventBridge for automated execution
 
+## Architecture Diagram
+
+![AI-Driven Container Anomaly Detection Architecture](images/architecture.png)
+
+The architecture diagram illustrates the complete system design, including:
+- Data flow between components
+- Security measures and compliance
+- Automated execution cycle
+- Monitoring and alerting system
+- Integration points between services
+
 ## Project Structure
 
 ```
