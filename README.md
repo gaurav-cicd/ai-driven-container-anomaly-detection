@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# ai-driven-container-anomaly-detection
-This project implements an AI-driven monitoring system to detect container performance anomalies using AWS SageMaker, Splunk, and Dynatrace.
-=======
 # AI-Driven Container Anomaly Detection
 
 This project implements an AI-driven monitoring system to detect container performance anomalies using AWS SageMaker, Splunk, and Dynatrace.
@@ -17,6 +13,8 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
 - **Automation**: AWS Lambda functions for alerting and scaling
 - **Monitoring**: Dynatrace integration for additional metrics
 - **Security**: HashiCorp Vault for secure credential management
+- **Configuration**: YAML-based configuration with Vault integration
+- **Logging**: Structured logging with metrics collection
 
 ## Project Structure
 
@@ -31,8 +29,10 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
 │   │   ├── anomaly_handler.py  # Handles anomaly detection and scaling
 │   │   └── deploy.py       # Deploys Lambda function to AWS
 │   └── utils/              # Utility functions
-│       └── vault_config.py # HashiCorp Vault configuration
+│       ├── vault_config.py # HashiCorp Vault configuration
+│       └── config_manager.py # YAML configuration management
 ├── config/                 # Configuration files
+│   └── config.yaml        # Main configuration file
 ├── tests/                  # Test files
 ├── requirements.txt        # Python dependencies
 └── README.md              # Project documentation
@@ -88,22 +88,17 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
 5. Store secrets in Vault:
    ```bash
    # AWS Credentials
-   vault kv put secret/container-anomaly-detection \
-     AWS_ACCESS_KEY_ID="your-access-key" \
-     AWS_SECRET_ACCESS_KEY="your-secret-key" \
-     AWS_REGION="us-west-2"
-
+   vault kv put secret/container-anomaly-detection/aws/iam role-arn="your-role-arn"
+   vault kv put secret/container-anomaly-detection/aws/sns topic-arn="your-topic-arn"
+   
    # Splunk Credentials
-   vault kv put secret/container-anomaly-detection \
-     SPLUNK_HOST="your-splunk-host" \
-     SPLUNK_PORT="8089" \
-     SPLUNK_USERNAME="your-username" \
-     SPLUNK_PASSWORD="your-password"
-
+   vault kv put secret/container-anomaly-detection/splunk/host "your-splunk-host"
+   vault kv put secret/container-anomaly-detection/splunk/username "your-username"
+   vault kv put secret/container-anomaly-detection/splunk/password "your-password"
+   
    # Dynatrace Credentials
-   vault kv put secret/container-anomaly-detection \
-     DYNATRACE_API_TOKEN="your-api-token" \
-     DYNATRACE_ENVIRONMENT_ID="your-environment-id"
+   vault kv put secret/container-anomaly-detection/dynatrace/api-token "your-api-token"
+   vault kv put secret/container-anomaly-detection/dynatrace/environment-id "your-environment-id"
    ```
 
 ### 2. AWS Setup
@@ -140,7 +135,7 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/ai-driven-container-anomaly-detection.git
+   git clone https://github.com/gaurav-cicd/ai-driven-container-anomaly-detection.git
    cd ai-driven-container-anomaly-detection
    ```
 
@@ -160,6 +155,15 @@ The system collects container metrics from Splunk, trains an AI model using AWS 
    export VAULT_URL="http://127.0.0.1:8200"
    export VAULT_TOKEN="your-dev-token"
    export VAULT_SECRET_PATH="secret/container-anomaly-detection"
+   ```
+
+5. Configure the application:
+   ```bash
+   # Copy the example config
+   cp config/config.yaml.example config/config.yaml
+   
+   # Edit the config file with your settings
+   # Note: Secrets should be referenced using vault:// prefix
    ```
 
 ## Usage Steps
@@ -223,26 +227,37 @@ Common issues and solutions:
    - Verify Vault server is running
    - Check VAULT_URL and VAULT_TOKEN environment variables
    - Ensure proper permissions for secret access
+   - Check Vault logs for authentication errors
 
-2. **Splunk Connection Issues**
+2. **Configuration Issues**
+   - Verify config.yaml file exists and is properly formatted
+   - Check Vault references in configuration
+   - Ensure all required configuration values are present
+   - Validate configuration using config_manager.py
+
+3. **Splunk Connection Issues**
    - Verify credentials in Vault
    - Check Splunk service status
    - Verify network connectivity
+   - Review Splunk logs for connection errors
 
-3. **AWS Authentication Errors**
+4. **AWS Authentication Errors**
    - Check AWS credentials in Vault
    - Verify IAM permissions
    - Ensure correct region is set
+   - Review AWS CloudTrail logs
 
-4. **Model Training Failures**
+5. **Model Training Failures**
    - Check data quality
    - Verify S3 bucket permissions
    - Review SageMaker logs
+   - Validate model parameters in config
 
-5. **Lambda Execution Issues**
+6. **Lambda Execution Issues**
    - Check CloudWatch logs
    - Verify Vault access from Lambda
    - Review IAM permissions
+   - Check Lambda timeout settings
 
 ## Contributing
 
@@ -279,5 +294,4 @@ For support, please:
 - Splunk community
 - Dynatrace support
 - HashiCorp Vault team
-- Contributors and maintainers 
->>>>>>> 9049cfc (initial commit)
+- Contributors and maintainers
